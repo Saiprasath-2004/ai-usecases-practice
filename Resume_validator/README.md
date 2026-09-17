@@ -1,6 +1,6 @@
 # ATS Resume Evaluator
 
-An evidence-based resume evaluation application built with LangGraph, Chroma, and OpenRouter.
+An evidence-based resume evaluation application built with LangGraph and OpenRouter.
 
 ## Project layout
 
@@ -10,13 +10,11 @@ src/ats_agent/
 	graph/        LangGraph state, nodes, and workflow builder
 	ingestion/    Resume PDF and job-description readers
 	llm/          Chat-model factory
-	rag/          Embeddings, chunking, and Chroma persistence
 	scoring/      Matching, normalization, and weighted scoring
 tests/          Deterministic unit tests
 examples/       Manual workflows that call the LLM
 data/           Job-description input
 input/          Resume input
-vectorstore/   Persisted Chroma data
 ```
 
 ## Setup

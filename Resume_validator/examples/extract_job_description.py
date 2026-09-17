@@ -1,9 +1,10 @@
+from pathlib import Path
+
 from ats_agent.graph.nodes import extract_job_description_requirements
-from ats_agent.ingestion.job_description import load_job_description
 
-document = load_job_description("data/jd.txt")
+jd_text = Path("data/jd.txt").read_text(encoding="utf-8")
 
-state = {"jd_context": document.page_content}
+state = {"jd_text": jd_text}
 
 result = extract_job_description_requirements(state)
 
