@@ -43,7 +43,7 @@ def calculate_experience_score(
     candidate_years: float | None,
 ) -> int:
     """
-    Score candidate experience on a 20-point scale.
+    Score candidate experience on a 25-point scale.
 
     Rules:
     - Unknown candidate experience -> 0.

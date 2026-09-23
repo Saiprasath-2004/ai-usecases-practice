@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from ats_agent.extraction.schemas import (
+from ats_agent.agent_layer.schemas import (
     JDRequirements,
     ResponsibilityMatch,
     ResponsibilityMatchResult,

@@ -1,4 +1,4 @@
-from ats_agent.extraction.schemas import JDRequirements
+from ats_agent.agent_layer.schemas import JDRequirements
 from ats_agent.graph.nodes import retrieve_job_description
 from ats_agent.ingestion.resume_parser import load_resume_text
 from ats_agent.llm.client import get_chat_model

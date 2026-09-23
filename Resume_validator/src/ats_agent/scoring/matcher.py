@@ -416,6 +416,9 @@ def match_keywords(
         len(matched) + len(missing)
     )
 
+    matched.sort(key=_normalize_text)
+    missing.sort(key=_normalize_text)
+
     keyword_coverage = (
         len(matched) / required_keyword_count
         if required_keyword_count
@@ -790,6 +793,7 @@ def match_responsibilities(
         "matched_responsibilities": matched,
         "missing_responsibilities": missing,
         "responsibility_matches": responsibility_matches,
+        "responsibility_evidence": responsibility_matches,
     }
 
 
@@ -804,12 +808,18 @@ def match_experience(
         return {
             "experience_match": False,
             "experience_status": "unknown",
+            "candidate_experience_years": None,
+            "required_experience_min": required_min,
+            "required_experience_max": required_max,
         }
 
     if required_min is None and required_max is None:
         return {
             "experience_match": True,
             "experience_status": "no_requirement",
+            "candidate_experience_years": candidate_years,
+            "required_experience_min": None,
+            "required_experience_max": None,
         }
 
     if (
@@ -819,6 +829,9 @@ def match_experience(
         return {
             "experience_match": False,
             "experience_status": "below_minimum",
+            "candidate_experience_years": candidate_years,
+            "required_experience_min": required_min,
+            "required_experience_max": required_max,
         }
 
     if (
@@ -828,20 +841,30 @@ def match_experience(
         return {
             "experience_match": True,
             "experience_status": "above_range",
+            "candidate_experience_years": candidate_years,
+            "required_experience_min": required_min,
+            "required_experience_max": required_max,
         }
 
     return {
         "experience_match": True,
         "experience_status": "meets_requirement",
+        "candidate_experience_years": candidate_years,
+        "required_experience_min": required_min,
+        "required_experience_max": required_max,
     }
-
 
 def match_requirements(
     jd_requirements: dict[str, Any],
     resume_profile: dict[str, Any],
-    embedder: Embeddings,
+    embedder: Embeddings | None = None,
 ) -> dict[str, Any]:
     """Match all extracted resume information against JD requirements."""
+
+    if embedder is None:
+        from ats_agent.embeddings.model import get_embedding_model
+
+        embedder = get_embedding_model()
 
     skill_matches = match_skills(
         required_skills=jd_requirements.get(

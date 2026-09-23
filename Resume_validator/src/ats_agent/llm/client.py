@@ -85,3 +85,22 @@ def parse_llm_json(content: str) -> dict[str, Any]:
         raise RuntimeError("Parsed LLM JSON output must be a valid dictionary object.")
 
     return data
+
+
+def extract_text_from_response(response: Any) -> str:
+    """Extract text content from various LLM response formats."""
+    if not response or not hasattr(response, "content") or not response.content:
+        return ""
+
+    content = response.content
+
+    if isinstance(content, str):
+        return content.strip()
+
+    if isinstance(content, list):
+        return "".join(
+            item.get("text", "") if isinstance(item, dict) else str(item)
+            for item in content
+        ).strip()
+
+    return str(content).strip()

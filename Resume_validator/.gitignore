@@ -1,6 +1,47 @@
-.env
-.venv/
+# Python
 __pycache__/
-.pytest_cache/
-vectorstore/
+*.py[cod]
+.venv/
+.uv/
+
+# Environment
+.env
+
+# Databases / local runtime state
+*.sqlite
+*.db
+*.sqlite3
+
+# LangGraph checkpoints
+checkpoints.sqlite
+
+# Generated archives
+*.zip
+
+# Python/build artifacts
 *.pyc
+
+# Frontend build/cache
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Generated images
+ats_workflow.png
+
+# Resume/test input files
+input/*.pdf
+resume.pdf
+
+# IDE
+.vscode/
+.idea/
+
+# Test/cache
+.pytest_cache/
+
+# Local vector database
+vectorstore/
+
+# Local project archives
+*.zip

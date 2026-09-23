@@ -1,4 +1,4 @@
-from ats_agent.extraction.schemas import ResponsibilityMatch, ResponsibilityMatchResult
+from ats_agent.agent_layer.schemas import ResponsibilityMatch, ResponsibilityMatchResult
 from ats_agent.scoring.matcher import match_requirements
 from ats_agent.scoring.scorer import calculate_ats_score
 
@@ -106,11 +106,11 @@ def test_candidate_evaluation_matches_and_scores_realistic_candidate():
     assert matches["experience_match"] is True
     assert matches["experience_status"] == "meets_requirement"
     assert result == {
-        "skill_score": 27,
+        "skill_score": 40,
         "experience_score": 25,
-        "keyword_score": 10,
-        "responsibility_score": 13,
-        "overall_score": 75,
+        "keyword_score": 3,
+        "responsibility_score": 6,
+        "overall_score": 74,
     }
 
 

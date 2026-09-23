@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from ats_agent.extraction.schemas import ResumeProfile
+from ats_agent.agent_layer.schemas import ResumeProfile
 
 
 def test_resume_processing_returns_structured_profile(monkeypatch):

@@ -1,4 +1,4 @@
-from ats_agent.extraction.schemas import JDRequirements
+from ats_agent.agent_layer.schemas import JDRequirements
 
 
 def test_job_description_processing_returns_structured_requirements(monkeypatch):
