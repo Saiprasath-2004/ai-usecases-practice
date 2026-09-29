@@ -1,0 +1,40 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	load_inputs(load_inputs)
+	extract_job_description_requirements(extract_job_description_requirements)
+	extract_resume_profile(extract_resume_profile)
+	extraction_complete(extraction_complete)
+	match_requirements(match_requirements)
+	calculate_ats_score(calculate_ats_score)
+	decision(decision)
+	build_report(build_report)
+	human_review(human_review)
+	schedule_interview(schedule_interview)
+	skill_gap_followup(skill_gap_followup)
+	rescore_with_reply(rescore_with_reply)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> load_inputs;
+	build_report --> human_review;
+	calculate_ats_score --> decision;
+	decision -. &nbsp;reject&nbsp; .-> build_report;
+	extract_job_description_requirements --> extraction_complete;
+	extract_resume_profile --> extraction_complete;
+	extraction_complete -. &nbsp;error&nbsp; .-> build_report;
+	extraction_complete -. &nbsp;continue&nbsp; .-> match_requirements;
+	human_review -. &nbsp;confirm_rejection&nbsp; .-> __end__;
+	human_review -.-> schedule_interview;
+	human_review -. &nbsp;followup&nbsp; .-> skill_gap_followup;
+	load_inputs --> extract_job_description_requirements;
+	load_inputs --> extract_resume_profile;
+	match_requirements --> calculate_ats_score;
+	rescore_with_reply --> decision;
+	skill_gap_followup --> rescore_with_reply;
+	schedule_interview --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

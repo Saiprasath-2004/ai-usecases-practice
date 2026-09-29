@@ -231,7 +231,8 @@ def extract_job_description_requirements(state: ATSState):
             ) from exc
 
         return {
-            "jd_requirements": result.model_dump()
+            "jd_requirements": result.model_dump(),
+            "jd_extraction_error": None,
         }
 
     from ats_agent.config import EXTRACTION_MAX_RETRIES
@@ -657,7 +658,8 @@ COMPLETE RESUME
             )
 
         return {
-            "resume_profile": profile.model_dump()
+            "resume_profile": profile.model_dump(),
+             "resume_extraction_error": None,
         }
 
     from ats_agent.config import EXTRACTION_MAX_RETRIES
@@ -731,6 +733,19 @@ def extraction_complete_node(state: ATSState):
 
 def match_requirements_node(state: ATSState):
     """Match extracted resume information against JD requirements."""
+
+    print("\n========== MATCH INPUT ==========")
+
+    profile = state["resume_profile"]
+
+    print("Skills count:", len(profile.get("skills", [])))
+    print("Skills:", [s.get("name") for s in profile.get("skills", [])])
+
+    print("Keywords count:", len(profile.get("keywords", [])))
+    print("Responsibilities count:", len(profile.get("responsibilities", [])))
+    print("Experience:", profile.get("experience_years"))
+
+    print("=================================\n")
 
     embedder = get_embedding_model()
 

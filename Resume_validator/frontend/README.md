@@ -1,97 +1,89 @@
-# Recruiter Console — frontend
+# ATS Recruiter Frontend — Phase 1
 
-A job-centric recruiter dashboard for the ATS agent: browse open jobs, run bulk
-evaluation, work an applicant pipeline board (Shortlisted / Needs Review / On
-Hold / Rejected), open a candidate's evaluation detail, and act on it. A
-"Quick evaluate" page keeps the original single-resume flow (`POST
-/candidates`) working as a standalone utility.
+React frontend for the existing FastAPI + LangGraph ATS backend. It is a direct client: no mock data, no
+invented endpoints, no scoring or matching logic in the browser.
 
-## Setup
+## Run
 
 ```bash
 npm install
-cp .env.example .env   # adjust VITE_API_BASE_URL if needed
-npm run dev
+cp .env.example .env      # VITE_API_BASE_URL=http://localhost:8000
+npm run dev               # http://localhost:5173
+npm run build             # tsc -b && vite build
+npm run lint
 ```
 
-Requires the FastAPI backend (`ats_agent.api.main:app`) running, by default at
-`http://localhost:8000`.
+The backend must allow the dev origin (`FRONTEND_ORIGINS`, default `http://localhost:5173`).
 
-## Before this will work: two backend changes are needed
+## What Phase 1 changed
 
-The frontend was built against the routes and schemas exactly as they exist in
-`src/ats_agent/api/` today. Two gaps on the backend side will block or limit it:
+**Recruiter Review** (route stays `/human-review`) replaces "Human Review" everywhere: sidebar, page title,
+breadcrumbs, dashboard/job-page links. Inside a candidate the decision area is titled **Recruiter's Decision**.
+The page lists evaluated candidates needing a decision, with filters All / Needs Review / Shortlisted / Follow-up.
 
-**1. CORS is not enabled.** `api/main.py` has no `CORSMiddleware`, so the
-browser will block every request from `http://localhost:5173`. Add:
+**Candidate page** (`/applications/:id`) is built around the decision, in this order: header → score + pipeline
+status → recruiter actions → AI Evaluation Summary → Score Breakdown → Skills → Responsibilities → Experience →
+Strengths → Areas to Clarify → Follow-up → Interview → Resume.
 
-```python
-from fastapi.middleware.cors import CORSMiddleware
+- Actions: **Schedule Interview** (primary), **Get More Details** (secondary), **Hold** / **Move to Review**
+  (pipeline), **Reject** (destructive, confirmed). "Confirm Rejection" is not shown.
+- Score is the visual anchor; component scores are points out of their weights (Skills 60, Experience 25,
+  Responsibilities 10, Keywords 5) — see `SCORE_WEIGHTS` in `src/lib/format.ts`.
+- Skills render as compact chips (matched vs needs clarification); responsibilities as wrapping list rows.
+- **Areas to Clarify** lists missing skills/responsibilities and has "Ask candidate about these", which opens
+  Get More Details pre-filled.
+- The AI score is always labelled as evidence, never a decision. The review flow (AI evaluated → evidence shown →
+  you review → you decide) is shown at the top of the page.
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-```
+**Strengths bug fixed.** The API stores `strengths` and `gaps` as JSON objects shaped
+`{ skills: [], keywords: [], responsibilities: [] }`. The old parser returned the object's keys, so the UI showed
+"skills / keywords / responsibilities". `asList()` no longer returns object keys, and
+`parseEvidenceGroups()` (in `src/lib/format.ts`) turns that shape into typed groups. Strengths are summarised from
+the real matched data ("8 required skills matched"), with a clean empty state when there is none.
 
-**2. `ApplicationRead` doesn't expose evaluation evidence.** The `Application`
-table already stores `score_breakdown`, `matched_skills`, `missing_skills`,
-`strengths`, `gaps`, `responsibilities_matched`, `responsibilities_missing`,
-`experience_result`, and `recruiter_comments`, but
-`api/schemas/applications.py`'s `ApplicationRead` only returns a handful of
-top-level fields, so `GET /applications/{id}` can't show the reasoning behind
-a score. The application detail panel reads all of these fields defensively
-and shows a note when they're missing — add them to `ApplicationRead` to light
-it up:
+**Candidate counts.** Every page reads candidates through the same per-job query (`useJobApplications`) and the
+same flattening (`src/lib/board.ts`), so Dashboard, Jobs and Job pages agree. A job whose candidates fail to
+load shows an error with **Try again** instead of "0 candidates" / "Nothing evaluated yet"; the multi-job pages
+keep their totals and show a "numbers may be incomplete" notice.
 
-```python
-class ApplicationRead(BaseModel):
-    application_id: str
-    candidate_name: str
-    candidate_email: str
-    pipeline_stage: PipelineStage
-    overall_score: Optional[float] = None
-    evaluation_status: EvaluationStatus
-    evaluation_verdict: Optional[str] = None
-    resume_path: str
-    score_breakdown: Optional[str] = None
-    matched_skills: Optional[str] = None
-    missing_skills: Optional[str] = None
-    strengths: Optional[str] = None
-    gaps: Optional[str] = None
-    responsibilities_matched: Optional[str] = None
-    responsibilities_missing: Optional[str] = None
-    experience_result: Optional[str] = None
-    recruiter_comments: Optional[str] = None
+**Evaluation Results tab** shows the current snapshot per candidate: Candidate, Score, Evaluation Status,
+Pipeline Stage, Experience, Skills, Action.
 
-    class Config:
-        from_attributes = True
-```
+**Terminology.** Evaluation Status: Not Evaluated / Evaluating / Completed / Failed (API values Pending /
+Running / Completed / Failed are mapped in `evaluationStatusLabel`). Pipeline Stage: Shortlisted / Needs Review /
+On Hold / Rejected. Recruiter actions are kept separate from both.
 
-Neither change was made in this delivery since it was scoped to the frontend
-— but without them the dashboard will either fail every request (CORS) or
-show empty evidence sections (schema).
+**No implementation wording in the UI.** Error text goes through `src/lib/errors.ts`, which maps known server
+messages to plain language and never shows raw exception text.
 
-## What's intentionally not here
+## How actions map to the API
 
-- **Create job / apply to job.** There's no `POST /jobs` or "create
-  application" endpoint on the backend, so there's no UI for either — jobs
-  and applications still need to be seeded directly in the database.
-- **Real interview scheduling and follow-up delivery.** The corresponding
-  routes (`/applications/{id}/interview-slots`, `/interview`,
-  `/follow-up/approve`, `/follow-up/reply`) are backend stubs that return a
-  placeholder response. The detail panel calls them and shows whatever they
-  return, so the UI is ready the moment they're implemented for real.
+| Action | Call |
+|---|---|
+| Schedule Interview | `POST /applications/{id}/review` with `decision: "Schedule Interview"` and the recruiter's free text in `comments` |
+| Get More Details | `POST /applications/{id}/review` with `decision: "Get More Details"` |
+| Hold | `POST /applications/{id}/hold` |
+| Move to Review | `POST /applications/{id}/actions` with `MOVE_TO_REVIEW` (`/review` rejects that decision string) |
+| Reject | `POST /applications/{id}/reject` |
+| Record candidate reply | `POST /applications/{id}/followup-reply` |
 
-## Structure
+## Known gaps in the API (shown to recruiters only as neutral empty states)
+
+- The AI recommendation and narrative are only returned by `followup-reply`; elsewhere the AI Evaluation Summary
+  shows counts derived from the stored evidence.
+- No endpoint lists past evaluation runs, so only the current snapshot is shown.
+- No endpoint lists interviews. Interviews scheduled from this app are remembered in the browser
+  (`src/api/interviews.ts`); follow-up requests likewise (`src/api/followups.ts`). Replace these with real reads
+  when the endpoints exist.
+- `follow_up_status` is never written by the backend.
+- Bulk evaluation has no progress endpoint; the job page polls until candidates settle.
+
+## Layout
 
 ```
-src/
-  api/            axios calls, one file per backend router
-  components/     shared UI (AppShell, ApplicationDetailPanel, Primitives, Toast)
-  pages/          JobsListPage, JobDetailPage, QuickEvaluatePage
-  types/          TypeScript mirrors of the backend Pydantic/SQLModel schemas
-  lib/format.ts   safe parsing for the JSON-encoded-string fields on Application
+src/api/         one module per domain (jobs, applications, calendar, interviews, followups, …)
+src/hooks/       useJobApplications (single source per job), useAllApplications (across jobs)
+src/lib/         format (parsing, terminology, experience), board, errors
+src/components/  evaluation/ (ScoreHero, ReviewFlow, EvaluationSections), review/, candidates/, calendar/, layout/
+src/pages/       one file per route
 ```

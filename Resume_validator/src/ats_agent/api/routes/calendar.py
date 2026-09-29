@@ -1,6 +1,7 @@
 """Recruiter calendar management API."""
 
 from datetime import date, datetime, time, timedelta
+from fastapi import HTTPException
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
@@ -14,14 +15,19 @@ from ats_agent.api.schemas.calendar import (
     AvailabilityRead,
     CalendarBlockRead,
     AvailableSlotsResponse,
+    InterviewCreate,
+    InterviewRead,
 )
 from ats_agent.domain.models import (
     RecruiterAvailability,
     CalendarBlock,
+    Interview,
 )
 from ats_agent.services.scheduling.slot_generator import (
     generate_available_slots,
 )
+from ats_agent.services.scheduling.booking import book_interview
+from ats_agent.agent_layer.actions import send_interview_invite
 
 router = APIRouter(
     prefix="/calendar",
@@ -327,3 +333,71 @@ def get_available_slots(
         "duration_minutes": duration_minutes,
         "slots": slots,
     }
+
+@router.get("/interviews", response_model=list[InterviewRead])
+def get_interviews(
+    recruiter_id: str,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+    session: Session = Depends(get_session),
+):
+    statement = select(Interview).where(
+        Interview.recruiter_id == recruiter_id
+    )
+
+    if start_at is not None:
+        statement = statement.where(
+            Interview.scheduled_at >= start_at
+        )
+
+    if end_at is not None:
+        statement = statement.where(
+            Interview.scheduled_at < end_at
+        )
+
+    statement = statement.order_by(Interview.scheduled_at)
+
+    return session.exec(statement).all()
+
+# Create interview booking
+@router.post(
+    "/interviews",
+    response_model=InterviewRead,
+    status_code=201,
+)
+def create_interview(
+    request: InterviewCreate,
+    session: Session = Depends(get_session),
+):
+    try:
+        interview = book_interview(
+            session=session,
+            application_id=request.application_id,
+            recruiter_id=request.recruiter_id,
+            scheduled_at=request.scheduled_at,
+            candidate_email=request.candidate_email,
+            duration_minutes=request.duration_minutes,
+            provider=request.provider,
+            meeting_url=request.meeting_url,
+            notes=request.notes,
+        )
+
+        action_id, action_status = send_interview_invite(
+            thread_id=request.application_id,
+            candidate_data={
+                "email": interview.candidate_email,
+                "scheduled_at": interview.scheduled_at.isoformat(),
+                "duration_minutes": interview.duration_minutes,
+                "meeting_url": interview.meeting_url,
+                "provider": interview.provider,
+                "notes": interview.notes,
+            },
+        )
+
+        return interview
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        ) from exc

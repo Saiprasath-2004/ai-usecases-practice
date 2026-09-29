@@ -6,7 +6,9 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from ats_agent.agent_layer.human_review import human_review_node
+
 from ats_agent.config import CHECKPOINT_DB_PATH
+
 from ats_agent.graph.nodes import (
     calculate_ats_score_node,
     decision_node,
@@ -19,6 +21,7 @@ from ats_agent.graph.nodes import (
     rescore_with_reply_node,
     skill_gap_followup_node,
 )
+
 from ats_agent.graph.state import ATSState
 
 
@@ -34,7 +37,6 @@ def route_after_extraction(state: ATSState) -> str:
     Both JD and resume extraction must complete successfully
     before matching starts.
     """
-
     if state.get("jd_extraction_error"):
         return "error"
 
@@ -59,12 +61,11 @@ def route_after_decision(state: ATSState) -> str:
     The ATS recommendation is not a final recruiter action.
 
     SELECT   -> Strong Match
-    ESCALATE -> Review / Hold
+    ESCALATE -> Review
     REJECT   -> Rejected
 
     All recommendations are sent to the recruiter review point.
     """
-
     verdict = state.get("verdict")
 
     if verdict == "SELECT":
@@ -93,7 +94,6 @@ def route_after_human_review(state: ATSState) -> str:
     The human-review node only captures the decision.
     External actions are handled by the application/service layer.
     """
-
     decision = state.get("human_decision")
 
     if decision == "Schedule Interview":
@@ -118,11 +118,34 @@ def route_after_human_review(state: ATSState) -> str:
 
 
 # ============================================================
+# Schedule interview graph node
+# ============================================================
+
+
+def schedule_interview_node(state: ATSState):
+    """
+    Record that the recruiter selected interview scheduling.
+
+    Actual scheduling side effects remain in the API/service layer.
+
+    This node does NOT:
+    - parse scheduling intent
+    - select a calendar slot
+    - create the interview
+    - send the invitation
+    """
+    return {
+        "action_type": "SCHEDULE_INTERVIEW",
+        "action_status": "PENDING",
+    }
+
+
+# ============================================================
 # Build graph
 # ============================================================
 
 
-def build_graph():
+def build_graph(use_checkpointer: bool = True):
     """Build and compile the ATS human-in-the-loop workflow."""
 
     builder = StateGraph(ATSState)
@@ -177,6 +200,11 @@ def build_graph():
     )
 
     builder.add_node(
+        "schedule_interview",
+        schedule_interview_node,
+    )
+
+    builder.add_node(
         "skill_gap_followup",
         skill_gap_followup_node,
     )
@@ -228,7 +256,7 @@ def build_graph():
         route_after_extraction,
         {
             "continue": "match_requirements",
-            "error": "build_report",
+            "error": END,
         },
     )
 
@@ -264,9 +292,6 @@ def build_graph():
     # Report → Human Review
     # ========================================================
 
-    # The ATS has completed its analysis.
-    #
-    # Now the workflow pauses and waits for the recruiter.
     builder.add_edge(
         "build_report",
         "human_review",
@@ -280,28 +305,23 @@ def build_graph():
         "human_review",
         route_after_human_review,
         {
-            # The graph stops here. The API/service layer performs
-            # the actual interview scheduling.
-            "schedule_interview": END,
-
-            # Generate questions and wait for candidate response.
+            "schedule_interview": "schedule_interview",
             "followup": "skill_gap_followup",
-
-            # Recruiter chose to keep the candidate on hold.
             "hold": END,
-
-            # The API/service layer performs the rejection action.
             "reject": END,
-
-            # Candidate remains in the review pipeline.
             "review": END,
-
-            # Recruiter confirmed the rejection.
             "confirm_rejection": END,
-
-            # Invalid recruiter input.
             "invalid": END,
         },
+    )
+
+    # ========================================================
+    # Schedule Interview → END
+    # ========================================================
+
+    builder.add_edge(
+        "schedule_interview",
+        END,
     )
 
     # ========================================================
@@ -326,13 +346,84 @@ def build_graph():
     # Persistent checkpointing
     # ========================================================
 
-    connection = sqlite3.connect(
-        CHECKPOINT_DB_PATH,
-        check_same_thread=False,
+    if use_checkpointer:
+        connection = sqlite3.connect(
+            CHECKPOINT_DB_PATH,
+            check_same_thread=False,
+        )
+
+        checkpointer = SqliteSaver(connection)
+
+        return builder.compile(
+            checkpointer=checkpointer,
+        )
+
+    return builder.compile()
+
+# ============================================================
+# LangGraph visualization
+# ============================================================
+
+
+def generate_graph_diagram():
+    """
+    Generate the Mermaid representation directly from the
+    compiled LangGraph.
+    """
+    graph = build_graph()
+
+    drawable_graph = graph.get_graph()
+
+    return drawable_graph.draw_mermaid()
+
+
+def generate_graph_png(output_path="ats_graph.png"):
+    """
+    Generate a PNG directly from the compiled LangGraph.
+
+    No Graphviz.
+    No manually constructed nodes.
+    No manually constructed edges.
+    """
+    graph = build_graph()
+
+    drawable_graph = graph.get_graph()
+
+    drawable_graph.draw_mermaid_png(
+        output_file_path=output_path,
     )
 
-    checkpointer = SqliteSaver(connection)
+    return output_path
 
-    return builder.compile(
-        checkpointer=checkpointer,
+
+# ============================================================
+# Generate diagrams
+# ============================================================
+
+
+if __name__ == "__main__":
+
+    # Generate Mermaid source
+    mermaid = generate_graph_diagram()
+
+    with open(
+        "ats_graph.mmd",
+        "w",
+        encoding="utf-8",
+    ) as f:
+        f.write(mermaid)
+
+    # Generate PNG directly from LangGraph
+    png_path = generate_graph_png(
+        "ats_graph.png",
+    )
+
+    print(mermaid)
+
+    print(
+        "\nMermaid diagram saved to: ats_graph.mmd"
+    )
+
+    print(
+        f"PNG diagram saved to: {png_path}"
     )

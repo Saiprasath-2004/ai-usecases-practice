@@ -23,6 +23,15 @@ def utc_now() -> datetime:
     """Return the current UTC datetime."""
     return datetime.now(timezone.utc)
 
+class EvaluationProcessingError(Exception):
+    def __init__(
+        self,
+        technical_error: str,
+        user_facing_error: str,
+    ):
+        super().__init__(technical_error)
+        self.technical_error = technical_error
+        self.user_facing_error = user_facing_error
 
 class BulkEvaluator:
     """
@@ -229,7 +238,32 @@ class BulkEvaluator:
             )
 
             # ------------------------------------------------
-            # 6. Persist EvaluationResult
+            # 5A. Detect early graph termination / failure
+            # ------------------------------------------------
+
+            if overall_score is None:
+
+                technical_error = (
+                    final_state.get("escalation_reason")
+                    or final_state.get("jd_extraction_error")
+                    or final_state.get("resume_extraction_error")
+                    or "Evaluation did not produce an ATS score."
+                )
+
+                recruiter_message = (
+                    "This resume could not be processed because it contains "
+                    "instructions or content that cannot be safely interpreted "
+                    "as candidate information. No ATS score was generated. "
+                    "Please review the resume manually or upload a revised version."
+                )
+
+                raise EvaluationProcessingError(
+                    technical_error=technical_error,
+                    user_facing_error=recruiter_message,
+                )
+
+            # ------------------------------------------------
+            # 6. Persist successful EvaluationResult
             # ------------------------------------------------
 
             with self.db.get_session() as session:
@@ -237,11 +271,7 @@ class BulkEvaluator:
                 evaluation_result = EvaluationResult(
                     run_id=run_id,
                     application_id=application_id,
-                    score=(
-                        float(overall_score)
-                        if overall_score is not None
-                        else 0.0
-                    ),
+                    score=float(overall_score),
                     breakdown=json.dumps(
                         result_data
                     ),
@@ -287,8 +317,14 @@ class BulkEvaluator:
                     )
 
                     application.strengths = json.dumps({
-                        "skills": matches.get("matched_skills", []),
-                        "keywords": matches.get("matched_keywords", []),
+                        "skills": matches.get(
+                            "matched_skills",
+                            [],
+                        ),
+                        "keywords": matches.get(
+                            "matched_keywords",
+                            [],
+                        ),
                         "responsibilities": matches.get(
                             "matched_responsibilities",
                             [],
@@ -296,8 +332,14 @@ class BulkEvaluator:
                     })
 
                     application.gaps = json.dumps({
-                        "skills": matches.get("missing_skills", []),
-                        "keywords": matches.get("missing_keywords", []),
+                        "skills": matches.get(
+                            "missing_skills",
+                            [],
+                        ),
+                        "keywords": matches.get(
+                            "missing_keywords",
+                            [],
+                        ),
                         "responsibilities": matches.get(
                             "missing_responsibilities",
                             [],
@@ -352,14 +394,9 @@ class BulkEvaluator:
                     # through the human-review/API layer.
                     # ----------------------------------------
 
-                    if waiting_for_review:
-                        application.evaluation_status = (
-                            EvaluationStatus.COMPLETED
-                        )
-                    else:
-                        application.evaluation_status = (
-                            EvaluationStatus.COMPLETED
-                        )
+                    application.evaluation_status = (
+                        EvaluationStatus.COMPLETED
+                    )
 
                     session.add(application)
 
@@ -409,10 +446,47 @@ class BulkEvaluator:
         # 8. Evaluation failure
         # ----------------------------------------------------
 
+        except EvaluationProcessingError as exc:
+
+            print(
+                f"Evaluation failed for {application_id}: "
+                f"{exc.technical_error}"
+            )
+
+            with self.db.get_session() as session:
+
+                run_db = session.get(
+                    EvaluationRun,
+                    run_id,
+                )
+
+                if run_db:
+                    run_db.status = RunStatus.FAILED
+                    run_db.error = exc.technical_error
+                    run_db.user_facing_error = exc.user_facing_error
+                    run_db.completed_at = utc_now()
+
+                    session.add(run_db)
+
+                application = session.get(
+                    Application,
+                    application_id,
+                )
+
+                if application:
+                    application.evaluation_status = (
+                        EvaluationStatus.FAILED
+                    )
+
+                    session.add(application)
+
+                session.commit()
+
+
         except Exception as exc:
 
             print(
-                f"Error evaluating "
+                f"Unexpected error evaluating "
                 f"{application_id}: {exc}"
             )
 
@@ -426,6 +500,10 @@ class BulkEvaluator:
                 if run_db:
                     run_db.status = RunStatus.FAILED
                     run_db.error = str(exc)
+                    run_db.user_facing_error = (
+                        "The ATS evaluation could not be completed. "
+                        "Please try again or review the resume manually."
+                    )
                     run_db.completed_at = utc_now()
 
                     session.add(run_db)

@@ -38,3 +38,7 @@ ACTIONS_DB_PATH = os.getenv("ACTIONS_DB_PATH", "actions_outbox.sqlite")
 EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "MOCK")
 EMAIL_API_KEY = os.getenv("EMAIL_API_KEY", "mock-key-12345")
 EMAIL_SENDER_ADDRESS = os.getenv("EMAIL_SENDER_ADDRESS", "recruiter@company.com")
+
+MINIMUM_NOTICE_HOURS = int(
+    os.getenv("MINIMUM_NOTICE_HOURS", "24")
+)

@@ -72,3 +72,44 @@ class AvailableSlotsResponse(BaseModel):
     target_date: date
     duration_minutes: int
     slots: list[AvailableSlot]
+
+
+class InterviewCreate(BaseModel):
+    application_id: str
+    recruiter_id: str
+    scheduled_at: datetime
+    duration_minutes: int = Field(default=60, gt=0)
+    candidate_email: str
+    provider: str | None = None
+    meeting_url: str | None = None
+    notes: str | None = None
+
+
+class InterviewRead(BaseModel):
+    id: int
+    application_id: str
+    recruiter_id: str
+
+    scheduled_at: datetime
+    duration_minutes: int
+
+    # Interview lifecycle
+    status: str
+
+    # Candidate invitation lifecycle
+    invitation_status: str
+    invitation_action_id: str | None
+
+    # Candidate response lifecycle
+    candidate_response: str
+    candidate_responded_at: datetime | None
+
+    # Calendar/provider information
+    provider: str | None
+    external_event_id: str | None
+    meeting_url: str | None
+
+    # Candidate information
+    candidate_email: str
+
+    notes: str | None

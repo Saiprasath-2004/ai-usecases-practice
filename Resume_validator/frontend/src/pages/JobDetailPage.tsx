@@ -1,187 +1,256 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, MapPin, Building2, PlayCircle, Users } from 'lucide-react';
-import { getJob, listJobApplications, triggerBulkEvaluation } from '../api/jobs';
-import { EmptyState, PageError, ScoreRing, Spinner, StageBadge } from '../components/Primitives';
-import { PIPELINE_STAGES, type ApplicationRead } from '../types';
+import { useNavigate, useParams } from 'react-router-dom';
+import { FileText, PlayCircle } from 'lucide-react';
+import { getJob, triggerBulkEvaluation } from '../api/jobs';
+import { evaluateApplication } from '../api/applications';
+import { useJobApplications } from '../hooks/useJobApplications';
+import { asList } from '../lib/format';
+import { describeError } from '../lib/errors';
 import { useToast } from '../components/Toast';
+import {
+  Badge,
+  Breadcrumbs,
+  Button,
+  EmptyState,
+  LoadingState,
+  Notice,
+  PageError,
+  PageHeader,
+  SectionCard,
+  Tabs,
+} from '../components/Primitives';
+import { CandidateTable } from '../components/candidates/CandidateTable';
+import { EvaluationResultsTable } from '../components/candidates/EvaluationResultsTable';
 
-export default function JobDetailPage() {
-  const { jobId, appId } = useParams();
+const TABS = [
+  { id: 'candidates', label: 'Candidates' },
+  { id: 'evaluation-results', label: 'Evaluation Results' },
+  { id: 'recruiter-review', label: 'Recruiter Review' },
+  { id: 'job-details', label: 'Job Details' },
+];
+
+const BULK_POLL_LIMIT_MS = 10 * 60 * 1000;
+
+export function JobDetailPage() {
+  const { jobId } = useParams<{ jobId: string }>();
   const id = Number(jobId);
   const navigate = useNavigate();
-  const qc = useQueryClient();
-  const { push } = useToast();
-  const [running, setRunning] = useState(false);
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [tab, setTab] = useState('candidates');
+  const [evaluatingId, setEvaluatingId] = useState<string | null>(null);
+  const [showDescription, setShowDescription] = useState(false);
+  const [bulkStartedAt, setBulkStartedAt] = useState<number | null>(null);
 
-  const jobQuery = useQuery({ queryKey: ['job', id], queryFn: () => getJob(id), enabled: !Number.isNaN(id) });
-  const appsQuery = useQuery({
-    queryKey: ['job-applications', id],
-    queryFn: () => listJobApplications(id),
-    enabled: !Number.isNaN(id),
-    refetchInterval: running ? 4000 : false,
+  const jobQuery = useQuery({ queryKey: ['job', id], queryFn: () => getJob(id), enabled: Number.isFinite(id) });
+  const { applications: all, isLoading, isError, error, refetch, dataUpdatedAt } = useJobApplications(id, {
+    poll: bulkStartedAt !== null,
   });
 
-  const bulkEval = useMutation({
+  const notEvaluated = all.filter((a) => a.evaluation_status === 'Pending').length;
+  const evaluating = all.filter((a) => a.evaluation_status === 'Running').length;
+  const completed = all.filter((a) => a.evaluation_status === 'Completed').length;
+  const failed = all.filter((a) => a.evaluation_status === 'Failed').length;
+  const waitingForReview = all.filter((a) => a.pipeline_stage === 'Needs Review' && a.evaluation_status === 'Completed');
+  const bulkActive = bulkStartedAt !== null;
+
+  // Stop polling once a bulk run has settled (nothing waiting, nothing running).
+  const summarized = useRef(false);
+  useEffect(() => {
+    if (bulkStartedAt === null) {
+      summarized.current = false;
+      return;
+    }
+    const fresh = dataUpdatedAt > bulkStartedAt;
+    const settled = fresh && notEvaluated === 0 && evaluating === 0;
+    const timedOut = Date.now() - bulkStartedAt > BULK_POLL_LIMIT_MS;
+    if ((settled || timedOut) && !summarized.current) {
+      summarized.current = true;
+      setBulkStartedAt(null);
+      if (failed > 0) toast.push('error', `Evaluation finished. ${failed} candidate${failed === 1 ? '' : 's'} could not be evaluated.`);
+      else toast.push('success', 'All candidates have been evaluated.');
+    }
+  }, [bulkStartedAt, dataUpdatedAt, notEvaluated, evaluating, failed, toast]);
+
+  const bulkMutation = useMutation({
     mutationFn: () => triggerBulkEvaluation(id),
-    onSuccess: (res) => {
-      push('success', res.message || 'Bulk evaluation started.');
-      setRunning(true);
-      qc.invalidateQueries({ queryKey: ['job-applications', id] });
-      window.setTimeout(() => setRunning(false), 60000);
+    onSuccess: () => {
+      setBulkStartedAt(Date.now());
+      queryClient.invalidateQueries({ queryKey: ['job-applications', id] });
     },
-    onError: (err: unknown) => {
-      push('error', extractError(err, 'Could not start bulk evaluation.'));
-    },
+    onError: (err) => toast.push('error', describeError(err).message),
   });
 
-  const board = appsQuery.data;
-  const totalApps = board ? Object.values(board).reduce((sum, list) => sum + (list?.length ?? 0), 0) : 0;
+  const evalMutation = useMutation({
+    mutationFn: (applicationId: string) => {
+      setEvaluatingId(applicationId);
+      return evaluateApplication(applicationId);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['job-applications', id] }),
+    onError: (err) => {
+      toast.push('error', describeError(err).message);
+      queryClient.invalidateQueries({ queryKey: ['job-applications', id] });
+    },
+    onSettled: () => setEvaluatingId(null),
+  });
+
+  if (jobQuery.isLoading) return <LoadingState label="Loading job…" />;
+  if (jobQuery.isError || !jobQuery.data) {
+    return <PageError message={describeError(jobQuery.error).message || "We couldn't find that job."} />;
+  }
+  const job = jobQuery.data;
 
   return (
     <div>
-      <Link to="/" className="focus-ring inline-flex items-center gap-1.5 text-sm text-ink-faint hover:text-ink">
-        <ArrowLeft className="h-3.5 w-3.5" /> All jobs
-      </Link>
+      <Breadcrumbs items={[{ label: 'Jobs', to: '/jobs' }, { label: job.title }]} />
+      <PageHeader
+        title={job.title}
+        subtitle={`${job.department} · ${job.location} · ${job.employment_type}`}
+        actions={
+          <>
+            <Button variant="secondary" icon={<FileText className="h-3.5 w-3.5" />} onClick={() => setShowDescription((s) => !s)}>
+              Job Description
+            </Button>
+            <Button
+              variant="primary"
+              icon={<PlayCircle className="h-3.5 w-3.5" />}
+              loading={bulkMutation.isPending || bulkActive}
+              disabled={notEvaluated === 0 && !bulkActive}
+              title={notEvaluated === 0 && !bulkActive ? 'Every candidate has already been evaluated' : undefined}
+              onClick={() => bulkMutation.mutate()}
+            >
+              {bulkActive ? 'Evaluating…' : 'Evaluate All Candidates'}
+            </Button>
+          </>
+        }
+      />
 
-      {jobQuery.isLoading && (
-        <div className="mt-8 flex items-center gap-2 text-ink-faint">
-          <Spinner className="h-5 w-5" /> Loading job…
+      <div className="mb-4 flex flex-wrap gap-2">
+        <Badge tone="brand">{job.evaluation_status}</Badge>
+        <Badge tone="neutral">
+          {isLoading ? 'Loading candidates…' : `${all.length} candidate${all.length === 1 ? '' : 's'}`}
+        </Badge>
+      </div>
+
+      {showDescription && (
+        <SectionCard title="Job description" className="mb-5">
+          <p className="whitespace-pre-wrap text-sm text-ink-soft">{job.job_description_text}</p>
+          {asList(job.required_skills).length > 0 && (
+            <div className="mt-3">
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-ink-faint">Required skills</p>
+              <div className="flex flex-wrap gap-1.5">
+                {asList(job.required_skills).map((s) => (
+                  <Badge key={s} tone="neutral">
+                    {s}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+        </SectionCard>
+      )}
+
+      {bulkActive && (
+        <div className="mb-5">
+          <Notice>
+            Evaluating candidates… {completed} of {all.length} evaluated
+            {evaluating > 0 ? ` · ${evaluating} in progress` : ''}
+            {failed > 0 ? ` · ${failed} failed` : ''}. This page updates automatically.
+          </Notice>
+        </div>
+      )}
+      {!bulkActive && failed > 0 && (
+        <div className="mb-5">
+          <Notice tone="warning">
+            {failed} evaluation{failed === 1 ? '' : 's'} didn't finish. Use Retry next to the candidate to run{' '}
+            {failed === 1 ? 'it' : 'them'} again.
+          </Notice>
         </div>
       )}
 
-      {jobQuery.isError && (
-        <div className="mt-6">
-          <PageError message={(jobQuery.error as Error)?.message || 'Could not load job.'} onRetry={() => jobQuery.refetch()} />
-        </div>
-      )}
+      <Tabs tabs={TABS} active={tab} onChange={setTab} />
 
-      {jobQuery.data && (
-        <header className="mt-4 flex flex-col justify-between gap-4 border-b border-line pb-6 md:flex-row md:items-end">
-          <div className="min-w-0">
-            <h1 className="font-display text-3xl text-ink">{jobQuery.data.title}</h1>
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5 text-sm text-ink-faint">
-              <span className="flex items-center gap-1.5">
-                <Building2 className="h-3.5 w-3.5" /> {jobQuery.data.department}
-              </span>
-              <span className="flex items-center gap-1.5">
-                <MapPin className="h-3.5 w-3.5" /> {jobQuery.data.location}
-              </span>
-              <span className="flex items-center gap-1.5">
-                <Users className="h-3.5 w-3.5" /> {totalApps} applicant{totalApps === 1 ? '' : 's'}
-              </span>
+      <div className="pt-5">
+        {isLoading ? (
+          <LoadingState label="Loading candidates…" />
+        ) : isError ? (
+          <div className="space-y-3">
+            <PageError message={describeError(error).message} />
+            <div className="text-center">
+              <Button variant="secondary" onClick={refetch}>
+                Try again
+              </Button>
             </div>
           </div>
+        ) : (
+          <>
+            {tab === 'candidates' && (
+              <SectionCard>
+                {all.length === 0 ? (
+                  <EmptyState title="No candidates yet" description="Candidates who apply for this job will appear here." />
+                ) : (
+                  <CandidateTable
+                    applications={all}
+                    evaluatingId={evaluatingId}
+                    onEvaluate={(applicationId) => evalMutation.mutate(applicationId)}
+                  />
+                )}
+              </SectionCard>
+            )}
 
-          <button
-            onClick={() => bulkEval.mutate()}
-            disabled={bulkEval.isPending}
-            className="focus-ring inline-flex items-center gap-2 self-start rounded-md bg-ink px-4 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            {bulkEval.isPending ? <Spinner className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
-            Run bulk evaluation
-          </button>
-        </header>
-      )}
+            {tab === 'evaluation-results' && (
+              <SectionCard>
+                {all.length === 0 ? (
+                  <EmptyState title="No candidates yet" description="Evaluation results will appear once candidates apply." />
+                ) : (
+                  <EvaluationResultsTable applications={all} />
+                )}
+              </SectionCard>
+            )}
 
-      {appsQuery.isLoading && (
-        <div className="mt-10 flex items-center gap-2 text-ink-faint">
-          <Spinner className="h-5 w-5" /> Loading applicants…
-        </div>
-      )}
+            {tab === 'recruiter-review' && (
+              <SectionCard
+                title={`${waitingForReview.length} waiting for your review`}
+                action={
+                  <Button size="sm" variant="secondary" onClick={() => navigate('/human-review')}>
+                    Open Recruiter Review
+                  </Button>
+                }
+              >
+                {waitingForReview.length === 0 ? (
+                  <EmptyState title="Nothing waiting on you" description="Evaluated candidates who need a decision appear here." />
+                ) : (
+                  <CandidateTable applications={waitingForReview} />
+                )}
+              </SectionCard>
+            )}
 
-      {appsQuery.isError && (
-        <div className="mt-6">
-          <PageError message={(appsQuery.error as Error)?.message || 'Could not load applications.'} onRetry={() => appsQuery.refetch()} />
-        </div>
-      )}
-
-      {board && totalApps === 0 && (
-        <div className="mt-8">
-          <EmptyState
-            title="No applications for this job yet"
-            description="Applications are created directly against the database today — there isn't an “apply” endpoint on the backend yet."
-          />
-        </div>
-      )}
-
-      {board && totalApps > 0 && (
-        <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {PIPELINE_STAGES.map((stage) => (
-            <PipelineColumn
-              key={stage}
-              stage={stage}
-              applications={board[stage] ?? []}
-              jobId={id}
-              activeAppId={appId}
-              onOpen={(app) => navigate(`/jobs/${id}/applications/${app.application_id}`)}
-            />
-          ))}
-        </div>
-      )}
-
-      <Outlet context={{ jobId: id }} />
-    </div>
-  );
-}
-
-function PipelineColumn({
-  stage,
-  applications,
-  activeAppId,
-  onOpen,
-}: {
-  stage: ApplicationRead['pipeline_stage'];
-  applications: ApplicationRead[];
-  jobId: number;
-  activeAppId?: string;
-  onOpen: (app: ApplicationRead) => void;
-}) {
-  return (
-    <div className="flex flex-col rounded-card border border-line bg-panel/50">
-      <div className="flex items-center justify-between border-b border-line px-4 py-3">
-        <StageBadge stage={stage} />
-        <span className="font-mono text-xs text-ink-faint">{applications.length}</span>
-      </div>
-      <div className="scrollbar-thin flex max-h-[70vh] flex-col gap-2.5 overflow-y-auto p-3">
-        {applications.length === 0 && (
-          <p className="px-2 py-6 text-center text-xs text-ink-faint">No candidates here.</p>
+            {tab === 'job-details' && (
+              <SectionCard title="Job details">
+                <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                  <Detail label="Title" value={job.title} />
+                  <Detail label="Department" value={job.department} />
+                  <Detail label="Location" value={job.location} />
+                  <Detail label="Employment type" value={job.employment_type} />
+                  <Detail label="Status" value={job.evaluation_status} />
+                </dl>
+                <p className="mb-1 mt-5 text-xs font-semibold uppercase tracking-wider text-ink-faint">Description</p>
+                <p className="whitespace-pre-wrap text-sm text-ink-soft">{job.job_description_text}</p>
+              </SectionCard>
+            )}
+          </>
         )}
-        {applications.map((app) => (
-          <button
-            key={app.application_id}
-            onClick={() => onOpen(app)}
-            className={`focus-ring flex items-center gap-3 rounded-md border bg-white px-3 py-2.5 text-left shadow-card transition-colors hover:border-ink/20 ${
-              activeAppId === app.application_id ? 'border-ink' : 'border-line'
-            }`}
-          >
-            <ScoreRing score={app.overall_score} size={38} />
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-ink">{app.candidate_name}</p>
-              <p className="truncate text-xs text-ink-faint">{app.candidate_email}</p>
-            </div>
-            <StatusDot status={app.evaluation_status} />
-          </button>
-        ))}
       </div>
     </div>
   );
 }
 
-function StatusDot({ status }: { status: ApplicationRead['evaluation_status'] }) {
-  const color =
-    status === 'Completed'
-      ? 'bg-moss-500'
-      : status === 'Failed'
-      ? 'bg-rust-500'
-      : status === 'Running'
-      ? 'bg-amber-500 animate-pulse'
-      : 'bg-ink-faint/50';
-  return <span title={status} className={`ml-auto h-2 w-2 shrink-0 rounded-full ${color}`} />;
-}
-
-export function extractError(err: unknown, fallback: string): string {
-  const anyErr = err as { response?: { data?: { detail?: string } }; message?: string };
-  return anyErr?.response?.data?.detail || anyErr?.message || fallback;
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs font-semibold uppercase tracking-wider text-ink-faint">{label}</dt>
+      <dd className="mt-0.5 text-ink">{value || '—'}</dd>
+    </div>
+  );
 }

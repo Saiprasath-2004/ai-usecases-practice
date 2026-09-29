@@ -1,6 +1,6 @@
 """Domain models for the ATS recruiter product."""
 
-from datetime import datetime, time
+from datetime import date, datetime, time
 from enum import Enum
 from typing import Optional
 
@@ -280,6 +280,7 @@ class EvaluationRun(SQLModel, table=True):
     completed_at: Optional[datetime] = None
 
     error: Optional[str] = None
+    user_facing_error: Optional[str] = None
 
 
 # ============================================================
@@ -454,7 +455,7 @@ class InterviewSlot(SQLModel, table=True):
 
 
 class Interview(SQLModel, table=True):
-    """Scheduled interview record."""
+    """Interview scheduled for an application."""
 
     __table_args__ = {"extend_existing": True}
 
@@ -473,17 +474,32 @@ class Interview(SQLModel, table=True):
 
     duration_minutes: int = 60
 
-    status: str = "Scheduled"
+    # --------------------------------------------------------
+    # Interview lifecycle
+    # --------------------------------------------------------
 
-    # Calendar provider information.
-    #
-    # Initially this can remain None because we are using
-    # the ATS calendar only.
-    #
-    # Later this can contain:
-    #   provider = "google"
-    #   external_event_id = "..."
-    #   meeting_url = "..."
+    status: str = "PendingInvitation"
+
+    # --------------------------------------------------------
+    # Candidate invitation lifecycle
+    # --------------------------------------------------------
+
+    invitation_status: str = "PENDING"
+
+    invitation_action_id: Optional[str] = None
+
+    # --------------------------------------------------------
+    # Candidate response lifecycle
+    # --------------------------------------------------------
+
+    candidate_response: str = "AWAITING_RESPONSE"
+
+    candidate_responded_at: Optional[datetime] = None
+
+    # --------------------------------------------------------
+    # Calendar provider information
+    # --------------------------------------------------------
+
     provider: Optional[str] = None
 
     external_event_id: Optional[str] = None
@@ -544,6 +560,15 @@ class CandidateReply(SQLModel, table=True):
     received_at: datetime = SQLField(
         default_factory=datetime.utcnow
     )
+
+
+class PublicHoliday(SQLModel, table=True):
+    __table_args__ = {"extend_existing": True}
+
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    holiday_date: date
+    name: str
+    active: bool = True
 
 
 # ============================================================

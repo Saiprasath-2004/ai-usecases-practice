@@ -1,4 +1,9 @@
-"""External recruiter actions with an idempotent SQLite outbox."""
+"""External recruiter actions with an idempotent SQLite outbox.
+
+The email provider is intentionally mocked for now.
+The rest of the application should interact only with these
+action functions so a real provider can be plugged in later.
+"""
 
 import datetime
 import json
@@ -7,15 +12,17 @@ import uuid
 from typing import Any
 
 from ats_agent.config import ACTIONS_DB_PATH, EMAIL_PROVIDER
-
+from ats_agent.agent_layer.candidate_communication import (
+    generate_followup_email,
+)
 
 # ============================================================
 # Constants
 # ============================================================
 
-
 INTERVIEW_INVITE = "INTERVIEW_INVITE"
 REJECTION_NOTICE = "REJECTION_NOTICE"
+FOLLOWUP_REQUEST = "FOLLOWUP_REQUEST"
 
 PENDING = "PENDING"
 SENT = "SENT"
@@ -29,7 +36,6 @@ FAILED = "FAILED"
 
 def _utc_now() -> str:
     """Return the current UTC timestamp as an ISO string."""
-
     return datetime.datetime.now(
         datetime.timezone.utc
     ).isoformat()
@@ -53,7 +59,6 @@ def init_outbox() -> None:
             )
             """
         )
-
         conn.commit()
 
 
@@ -84,7 +89,6 @@ def _record_action(
     now = _utc_now()
 
     with sqlite3.connect(ACTIONS_DB_PATH) as conn:
-
         existing = conn.execute(
             """
             SELECT action_id
@@ -131,7 +135,9 @@ def _record_action(
     return action_id
 
 
-def _get_action_status(action_id: str) -> str | None:
+def _get_action_status(
+    action_id: str,
+) -> str | None:
     """Return the current status of an action."""
 
     with sqlite3.connect(ACTIONS_DB_PATH) as conn:
@@ -168,7 +174,6 @@ def _mark_sent(action_id: str) -> None:
                 action_id,
             ),
         )
-
         conn.commit()
 
 
@@ -192,7 +197,6 @@ def _mark_failed(
                 action_id,
             ),
         )
-
         conn.commit()
 
 
@@ -204,7 +208,7 @@ def _mark_failed(
 def _validate_candidate_data(
     candidate_data: dict[str, Any],
 ) -> None:
-    """Validate the minimum candidate information required for email."""
+    """Validate minimum candidate information required for email."""
 
     if not isinstance(candidate_data, dict):
         raise TypeError(
@@ -213,10 +217,106 @@ def _validate_candidate_data(
 
     email = candidate_data.get("email")
 
-    if not email:
+    if not email or not str(email).strip():
         raise ValueError(
             "Candidate email is required."
         )
+
+
+# ============================================================
+# Mock email provider
+# ============================================================
+
+
+def _mock_send_email(
+    *,
+    recipient: str,
+    subject: str,
+    body: str,
+) -> None:
+    """
+    Mock email provider.
+
+    This simulates successful email delivery.
+    Replace this function with a real provider later.
+    """
+
+    print()
+    print("=" * 60)
+    print(f"[MOCK EMAIL PROVIDER: {EMAIL_PROVIDER}]")
+    print(f"TO: {recipient}")
+    print(f"SUBJECT: {subject}")
+    print("-" * 60)
+    print(body)
+    print("=" * 60)
+    print()
+
+
+# ============================================================
+# Generic email action
+# ============================================================
+
+
+def _send_email_action(
+    *,
+    thread_id: str,
+    action_type: str,
+    candidate_data: dict[str, Any],
+    subject: str,
+    body: str,
+) -> tuple[str, str]:
+    """
+    Persist and execute an email action.
+
+    Flow:
+
+        create outbox action
+            ↓
+        PENDING
+            ↓
+        mock provider
+            ↓
+        SENT / FAILED
+    """
+
+    init_outbox()
+
+    _validate_candidate_data(candidate_data)
+
+    payload = {
+        **candidate_data,
+        "subject": subject,
+        "body": body,
+    }
+
+    action_id = _record_action(
+        thread_id=thread_id,
+        action_type=action_type,
+        payload=payload,
+    )
+
+    status = _get_action_status(action_id)
+
+    if status == SENT:
+        return action_id, SENT
+
+    try:
+        _mock_send_email(
+            recipient=str(candidate_data["email"]),
+            subject=subject,
+            body=body,
+        )
+
+        _mark_sent(action_id)
+
+        return action_id, SENT
+
+    except Exception as exc:
+        _mark_failed(
+            action_id,
+            str(exc),
+        )
+        raise
 
 
 # ============================================================
@@ -229,49 +329,56 @@ def send_interview_invite(
     candidate_data: dict[str, Any],
 ) -> tuple[str, str]:
     """
-    Send an interview invitation through the configured provider.
+    Send an interview invitation.
 
-    This function does not decide whether an interview should be
-    scheduled. The recruiter/API layer must make that decision first.
+    The recruiter/API layer must already have decided that
+    an interview should be scheduled.
     """
 
-    init_outbox()
-
-    _validate_candidate_data(candidate_data)
-
-    action_id = _record_action(
-        thread_id=thread_id,
-        action_type=INTERVIEW_INVITE,
-        payload=candidate_data,
+    candidate_name = (
+        candidate_data.get("candidate_name")
+        or "Candidate"
     )
 
-    status = _get_action_status(action_id)
+    scheduled_at = (
+        candidate_data.get("scheduled_at")
+        or "To be confirmed"
+    )
 
-    if status == SENT:
-        return action_id, SENT
+    duration = (
+        candidate_data.get("duration_minutes")
+        or 60
+    )
 
-    try:
-        print(
-            f"[EMAIL PROVIDER {EMAIL_PROVIDER}] "
-            f"Sending interview invite to "
-            f"{candidate_data.get('email')}..."
-        )
+    meeting_url = (
+        candidate_data.get("meeting_url")
+        or "Meeting link will be provided separately."
+    )
 
-        # TODO:
-        # Replace this mock provider call with the actual
-        # email provider integration.
+    subject = "Interview Invitation"
 
-        _mark_sent(action_id)
+    body = f"""Hello {candidate_name},
 
-        return action_id, SENT
+We are pleased to invite you for an interview.
 
-    except Exception as exc:
-        _mark_failed(
-            action_id,
-            str(exc),
-        )
+Interview details:
+Date and time: {scheduled_at}
+Duration: {duration} minutes
+Meeting link: {meeting_url}
 
-        raise
+Please let us know if you have any questions.
+
+Best regards,
+Recruitment Team
+"""
+
+    return _send_email_action(
+        thread_id=thread_id,
+        action_type=INTERVIEW_INVITE,
+        candidate_data=candidate_data,
+        subject=subject,
+        body=body,
+    )
 
 
 # ============================================================
@@ -284,46 +391,86 @@ def send_rejection_notice(
     candidate_data: dict[str, Any],
 ) -> tuple[str, str]:
     """
-    Send a rejection notice through the configured provider.
+    Send a candidate rejection notice.
 
-    This function does not decide whether the candidate should
-    be rejected. The recruiter/API layer must make that decision.
+    The recruiter/API layer must already have made the
+    rejection decision.
     """
 
-    init_outbox()
+    candidate_name = (
+        candidate_data.get("candidate_name")
+        or "Candidate"
+    )
+
+    subject = "Application Update"
+
+    body = f"""Hello {candidate_name},
+
+Thank you for taking the time to apply for this position.
+
+After reviewing your application, we have decided not to
+move forward with your application at this time.
+
+We appreciate your interest in our organization and wish
+you the best in your future opportunities.
+
+Best regards,
+Recruitment Team
+"""
+
+    return _send_email_action(
+        thread_id=thread_id,
+        action_type=REJECTION_NOTICE,
+        candidate_data=candidate_data,
+        subject=subject,
+        body=body,
+    )
+
+
+# ============================================================
+# Follow-up request
+# ============================================================
+def send_followup_request(
+    thread_id: str,
+    candidate_data: dict[str, Any],
+    questions: list[str],
+) -> tuple[str, str]:
+    """
+    Send candidate follow-up questions.
+
+    The candidate-facing email content is generated separately.
+    This function handles the external communication and outbox.
+    """
+
+    if not questions:
+        raise ValueError(
+            "At least one follow-up question is required."
+        )
 
     _validate_candidate_data(candidate_data)
 
-    action_id = _record_action(
-        thread_id=thread_id,
-        action_type=REJECTION_NOTICE,
-        payload=candidate_data,
+    candidate_name = (
+        candidate_data.get("candidate_name")
+        or "Candidate"
     )
 
-    status = _get_action_status(action_id)
+    # --------------------------------------------------------
+    # Generate natural candidate-facing content
+    # --------------------------------------------------------
 
-    if status == SENT:
-        return action_id, SENT
+    email_content = generate_followup_email(
+        candidate_name=str(candidate_name),
+        questions=questions,
+    )
 
-    try:
-        print(
-            f"[EMAIL PROVIDER {EMAIL_PROVIDER}] "
-            f"Sending rejection notice to "
-            f"{candidate_data.get('email')}..."
-        )
+    # --------------------------------------------------------
+    # Send through the existing outbox/provider layer
+    # --------------------------------------------------------
 
-        # TODO:
-        # Replace this mock provider call with the actual
-        # email provider integration.
-
-        _mark_sent(action_id)
-
-        return action_id, SENT
-
-    except Exception as exc:
-        _mark_failed(
-            action_id,
-            str(exc),
-        )
-
-        raise
+    return _send_email_action(
+        thread_id=thread_id,
+        action_type=FOLLOWUP_REQUEST,
+        candidate_data=candidate_data,
+        subject=email_content["subject"],
+        body=email_content["body"],
+    )

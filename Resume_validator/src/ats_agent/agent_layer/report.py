@@ -14,7 +14,6 @@ def build_evidence(
     It only organizes matching and scoring information so that it can
     be presented to the recruiter during human review.
     """
-
     return {
         "skills": {
             "matched": matches.get("matched_skills", []),
@@ -78,7 +77,6 @@ def render_narrative(
     The narrative only uses facts already present in the evidence.
     It does not generate new claims or make an independent decision.
     """
-
     skills = evidence.get("skills", {})
     keywords = evidence.get("keywords", {})
     responsibilities = evidence.get(
@@ -94,10 +92,12 @@ def render_narrative(
         {},
     )
 
-    overall_score = scores.get(
-        "overall_score",
-        0.0,
-    )
+    overall_score = scores.get("overall_score")
+
+    if overall_score is None:
+        raise ValueError(
+            "Cannot render ATS narrative: overall_score is missing."
+        )
 
     matched_skills = skills.get(
         "matched",
@@ -107,7 +107,6 @@ def render_narrative(
         "missing",
         [],
     )
-
     matched_keywords = keywords.get(
         "matched",
         [],
@@ -116,7 +115,6 @@ def render_narrative(
         "missing",
         [],
     )
-
     matched_responsibilities = responsibilities.get(
         "matched",
         [],

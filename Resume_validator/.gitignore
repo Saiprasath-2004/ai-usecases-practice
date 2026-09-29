@@ -45,3 +45,8 @@ vectorstore/
 
 # Local project archives
 *.zip
+
+
+.langgraph_api/
+checkpoints.sqlite-shm
+checkpoints.sqlite-wal

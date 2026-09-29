@@ -1,7 +1,7 @@
 """Pydantic schemas for application API endpoints."""
 
 from typing import Dict, List, Optional
-
+from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from ats_agent.domain.models import (
@@ -150,6 +150,7 @@ class ReviewRequest(BaseModel):
         default=None,
         description="Optional recruiter review comments.",
     )
+   
 
 class FollowupReplyRequest(BaseModel):
     candidate_reply: str = Field(
@@ -165,8 +166,6 @@ class FollowupReplyRequest(BaseModel):
 
 class EvaluationResponse(BaseModel):
     """Response returned after starting/completing evaluation."""
-
-    status: str
     application_id: str
     evaluation_status: EvaluationStatus
     pipeline_stage: PipelineStage
@@ -175,7 +174,9 @@ class EvaluationResponse(BaseModel):
     run_id: Optional[int] = None
     run_status: Optional[RunStatus] = None
 
-
+class InterviewResponseRequest(BaseModel):
+    response: str
+    
 # ============================================================
 # Application Update
 # ============================================================

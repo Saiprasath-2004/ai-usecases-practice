@@ -12,6 +12,10 @@ from ats_agent.services.scheduling.availability import (
     is_full_day_blocked,
 )
 
+from ats_agent.services.scheduling.notice import (
+    satisfies_minimum_notice,
+)
+from ats_agent.services.scheduling.holidays import is_public_holiday
 
 def validate_requested_slot(
     session: Session,
@@ -36,6 +40,15 @@ def validate_requested_slot(
     )
 
     target_date: date = start_at.date()
+
+    if not satisfies_minimum_notice(start_at):
+        return (
+            False,
+            "Requested interview does not satisfy the minimum notice requirement.",
+        )
+
+    if is_public_holiday(session, target_date):
+        return False, "Requested interview falls on a public holiday."
 
     availability_windows = get_weekly_availability(
         session=session,

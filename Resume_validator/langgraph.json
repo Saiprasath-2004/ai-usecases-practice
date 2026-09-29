@@ -1,0 +1,7 @@
+{
+  "dependencies": ["./"],
+  "graphs": {
+    "ats_agent": "./src/ats_agent/graph/studio.py:graph"
+  },
+  "env": ".env"
+}

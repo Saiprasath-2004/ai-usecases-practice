@@ -11,7 +11,10 @@ from ats_agent.services.scheduling.availability import (
     get_weekly_availability,
     is_full_day_blocked,
 )
-
+from ats_agent.services.scheduling.holidays import is_public_holiday
+from ats_agent.services.scheduling.notice import (
+    get_minimum_allowed_start,
+)
 
 def _overlaps(
     start: datetime,
@@ -62,6 +65,13 @@ def generate_available_slots(
 
     if not availability_windows:
         return []
+
+    if is_public_holiday(session, target_date):
+        return []
+
+    minimum_allowed_start = get_minimum_allowed_start()
+
+    
 
     blocks = get_calendar_blocks(
         session=session,
@@ -117,6 +127,10 @@ def generate_available_slots(
 
             candidate_end = candidate_start + duration
 
+            if candidate_start < minimum_allowed_start:
+                candidate_start += interval
+                continue
+
             # Check calendar blocks.
             blocked = any(
                 _overlaps(
@@ -156,3 +170,60 @@ def generate_available_slots(
     slots.sort(key=lambda slot: slot["start"])
 
     return slots
+
+def find_next_available_slot(
+    session: Session,
+    recruiter_id: str,
+    duration_minutes: int = 60,
+    slot_interval_minutes: int = 30,
+    max_days: int = 30,
+) -> dict[str, datetime] | None:
+    """
+    Find the earliest available interview slot.
+
+    The search automatically skips:
+        - slots before minimum notice
+        - weekends
+        - unavailable days
+        - full-day blocks
+        - partial calendar blocks
+        - existing interviews
+
+    Searches forward up to max_days.
+    """
+
+    if duration_minutes <= 0:
+        raise ValueError(
+            "duration_minutes must be greater than zero."
+        )
+
+    if slot_interval_minutes <= 0:
+        raise ValueError(
+            "slot_interval_minutes must be greater than zero."
+        )
+
+    if max_days <= 0:
+        raise ValueError(
+            "max_days must be greater than zero."
+        )
+
+    minimum_allowed_start = get_minimum_allowed_start()
+
+    search_date = minimum_allowed_start.date()
+
+    for _ in range(max_days):
+
+        slots = generate_available_slots(
+            session=session,
+            recruiter_id=recruiter_id,
+            target_date=search_date,
+            duration_minutes=duration_minutes,
+            slot_interval_minutes=slot_interval_minutes,
+        )
+
+        if slots:
+            return slots[0]
+
+        search_date += timedelta(days=1)
+
+    return None

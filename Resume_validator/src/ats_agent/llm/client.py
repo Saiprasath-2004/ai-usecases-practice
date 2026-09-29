@@ -31,16 +31,15 @@ def get_chat_model(json_mode: bool = True) -> BaseChatModel:
         model=GROQ_PRIMARY_MODEL,
         groq_api_key=GROQ_API_KEY,
         temperature=0.0,
-        max_tokens=4096,
+        max_tokens=8192,
         model_kwargs=model_kwargs,
     )
 
-    # Fallback Model
     fallback_llm = ChatGroq(
         model=GROQ_FALLBACK_MODEL,
         groq_api_key=GROQ_API_KEY,
         temperature=0.0,
-        max_tokens=4096,
+        max_tokens=8192,
         model_kwargs=model_kwargs,
     )
 
