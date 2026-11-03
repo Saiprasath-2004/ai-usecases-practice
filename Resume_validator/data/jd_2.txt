@@ -1,0 +1,17 @@
+Job Description
+
+Role: Full Stack Developer
+
+Requirements:
+- Python
+- FastAPI
+- React
+- PostgreSQL
+- 2+ years of experience
+
+Responsibilities:
+- Build backend APIs
+- Develop frontend applications
+- Design database structures
+- Participate in code reviews
+

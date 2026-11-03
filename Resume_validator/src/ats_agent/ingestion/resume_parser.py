@@ -6,17 +6,34 @@ from pypdf import PdfReader
 
 
 def load_resume_text(path: str | Path) -> str:
-    """Return the concatenated text extracted from every PDF page."""
+    """Extract and return text from all pages of a PDF resume."""
     resume_path = Path(path)
 
-    reader = PdfReader(resume_path)
+    if not resume_path.is_file():
+        raise FileNotFoundError(
+            f"Resume PDF not found: {resume_path}"
+        )
 
-    pages = []
+    try:
+        reader = PdfReader(resume_path)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to read resume PDF: {resume_path}"
+        ) from exc
+
+    pages: list[str] = []
 
     for page in reader.pages:
         text = page.extract_text()
 
-        if text:
-            pages.append(text)
+        if text and text.strip():
+            pages.append(text.strip())
 
-    return "\n".join(pages)
+    resume_text = "\n\n".join(pages).strip()
+
+    if not resume_text:
+        raise ValueError(
+            f"Resume PDF contains no extractable text: {resume_path}"
+        )
+
+    return resume_text
