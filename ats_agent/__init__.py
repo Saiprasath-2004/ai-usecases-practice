@@ -1,0 +1,1 @@
+"""ATS resume evaluation application."""

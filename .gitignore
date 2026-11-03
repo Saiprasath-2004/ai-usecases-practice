@@ -1,0 +1,36 @@
+# Secrets / environment
+.env
+.env.*
+!.env.example
+*.bak
+*.pem
+*.key
+credentials*.json
+service-account*.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.uv/
+
+# Node / frontend
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Local runtime state
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-shm
+*.sqlite-wal
+.langgraph_api/
+vectorstore/
+
+# Misc
+*.zip
+.pytest_cache/
+.vscode/
+.idea/
